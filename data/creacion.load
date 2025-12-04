@@ -1,0 +1,17 @@
+LOAD DATABASE
+    FROM sqlite:///data/financial.sqlite
+    INTO postgresql://dani:1234@postgres:5432/financial
+
+ WITH
+     create tables,
+     create indexes,
+     reset sequences 
+
+ SET
+     work_mem to '16MB',
+     maintenance_work_mem to '512 MB'
+
+ CAST
+     type "int(11)" to integer,
+     type datetime to timestamptz using zero-dates-to-null,
+     type date to date using zero-dates-to-null;

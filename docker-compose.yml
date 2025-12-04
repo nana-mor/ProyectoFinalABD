@@ -1,0 +1,117 @@
+x-airflow-common:
+  &airflow-common
+  image: apache/airflow:2.9.1
+  environment:
+    &airflow-common-env 
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://${AIRFLOW_USER}:${AIRFLOW_PASSWORD}@postgres:5432/${AIRFLOW_DB}"
+    AIRFLOW__CORE_DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth'
+    _PIP_ADDITIONAL_REQUIREMENTS: ""
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/logs:/opt/airflow/logs
+    - ./airflow/plugins:/opt/airflow/plugins
+    - ./backups:/var/lib/postgresql/backups
+    - ./backups:/opt/airflow/backups
+  user: "0:0"
+  networks:
+    - red-financial
+    
+
+
+
+services:
+  postgres:
+    container_name: postgres
+    image: postgres:latest
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pg_data:/var/lib/postgresql
+      - ./backups:/var/lib/postgresql/backups
+      - ./airflow/script/create_airflow_db.sql:/docker-entrypoint-initdb.d/create_airflow_db.sql
+    restart: always
+    networks:
+      - red-financial
+
+
+  pgloader:
+    image: dimitri/pgloader
+    platform: linux/amd64
+    depends_on:
+      - postgres
+    volumes:
+      - ./data:/data
+    entrypoint:
+      - bash
+      - -c
+      - |
+        echo "Esperando 20 segundos a que Postgres arranque..."
+        sleep 20
+        echo "Ejecutando pgloader."
+        pgloader /data/creacion.load
+    networks:
+      - red-financial
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_started
+
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    build:
+      context: .
+      dockerfile: airflow_scheduler.Dockerfile
+    restart: always
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_started
+
+
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: 
+      - bash
+      - -c 
+      - |
+        sleep 15
+        airflow db init
+        airflow users create \
+          --username airflow \
+          --password airflow \
+          --firstname Dani \
+          --lastname Amador \
+          --role Admin \
+          --email amadordana125@gmail.com
+    depends_on:
+      - postgres
+
+
+volumes:
+  pg_data:
+
+networks:
+  red-financial:
+    driver: bridge
